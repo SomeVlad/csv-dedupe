@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bitwarden CSV Менеджер</title>
+    <style>
+      :root {
+        --primary-color: #175ddc;
+        --primary-hover: #0d4bb0;
+        --secondary-color: #e9edf5;
+        --danger-color: #dc3545;
+        --danger-hover: #bd2130;
+        --success-color: #28a745;
+        --success-hover: #218838;
+        --text-color: #333;
+        --bg-color: #f8f9fa;
+        --border-color: #dfe3e8;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+          "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans",
+          "Helvetica Neue", sans-serif;
+        margin: 0;
+        padding: 0;
+        color: var(--text-color);
+        background-color: var(--bg-color);
+        line-height: 1.6;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      h1 {
+        color: var(--primary-color);
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+
+      .card {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        padding: 2rem;
+        margin-bottom: 2rem;
+      }
+
+      .dropzone {
+        border: 2px dashed var(--border-color);
+        border-radius: 8px;
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+
+      .dropzone.active {
+        border-color: var(--primary-color);
+        background-color: var(--secondary-color);
+      }
+
+      .button {
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        font-weight: 500;
+        transition: background-color 0.3s;
+      }
+
+      .primary-button {
+        background-color: var(--primary-color);
+        color: white;
+      }
+
+      .primary-button:hover {
+        background-color: var(--primary-hover);
+      }
+
+      .danger-button {
+        background-color: var(--danger-color);
+        color: white;
+      }
+
+      .danger-button:hover {
+        background-color: var(--danger-hover);
+      }
+
+      .success-button {
+        background-color: var(--success-color);
+        color: white;
+      }
+
+      .success-button:hover {
+        background-color: var(--success-hover);
+      }
+
+      .button-group {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1rem 0;
+      }
+
+      .search-container {
+        margin-bottom: 1rem;
+      }
+
+      .search-input {
+        width: 100%;
+        padding: 0.8rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 1rem;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 1rem;
+      }
+
+      th {
+        background-color: var(--secondary-color);
+        padding: 0.8rem;
+        text-align: left;
+        border-bottom: 2px solid var(--border-color);
+      }
+
+      td {
+        padding: 0.8rem;
+        border-bottom: 1px solid var(--border-color);
+        word-break: break-word;
+      }
+
+      tr:hover {
+        background-color: var(--secondary-color);
+      }
+
+      .checkbox-cell {
+        width: 30px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .stats {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        font-weight: 500;
+      }
+
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+
+      .modal {
+        background-color: white;
+        border-radius: 8px;
+        padding: 2rem;
+        width: 80%;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow: auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+      }
+
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+
+      .modal-close {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+      }
+
+      .form-group {
+        margin-bottom: 1rem;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+      }
+
+      .form-control {
+        width: 100%;
+        padding: 0.8rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 1rem;
+      }
+
+      textarea.form-control {
+        min-height: 100px;
+        resize: vertical;
+      }
+
+      .text-center {
+        text-align: center;
+      }
+
+      .text-right {
+        text-align: right;
+      }
+
+      .spinner {
+        border: 4px solid rgba(0, 0, 0, 0.1);
+        border-radius: 50%;
+        border-top: 4px solid var(--primary-color);
+        width: 24px;
+        height: 24px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .toast {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: white;
+        border-left: 4px solid var(--success-color);
+        padding: 1rem;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        border-radius: 4px;
+        z-index: 1001;
+        animation: slideIn 0.3s, fadeOut 0.5s 2.5s forwards;
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+        }
+        to {
+          transform: translateX(0);
+        }
+      }
+
+      @keyframes fadeOut {
+        from {
+          opacity: 1;
+        }
+        to {
+          opacity: 0;
+        }
+      }
+
+      .filter-indicator {
+        margin-left: 0.5rem;
+        font-size: 0.8rem;
+        color: var(--primary-color);
+        font-weight: bold;
+      }
+
+      .export-raw-container {
+        margin-top: 1rem;
+      }
+
+      .export-raw {
+        width: 100%;
+        min-height: 200px;
+        font-family: monospace;
+        padding: 1rem;
+        border-radius: 4px;
+        border: 1px solid var(--border-color);
+        resize: vertical;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Bitwarden CSV Менеджер</h1>
+
+      <div class="card">
+        <div id="upload-section">
+          <div id="dropzone" class="dropzone">
+            <p>Перетащите файл CSV сюда или нажмите для выбора файла</p>
+            <input
+              type="file"
+              id="csv-file"
+              accept=".csv"
+              style="display: none"
+            />
+          </div>
+        </div>
+
+        <div id="data-section" class="hidden">
+          <div class="stats">
+            <div>Всего записей: <span id="total-count">0</span></div>
+            <div>Выбрано: <span id="selected-count">0</span></div>
+            <div>Дубликатов: <span id="duplicate-count">0</span></div>
+          </div>
+
+          <div class="button-group">
+            <button id="remove-duplicates" class="button primary-button">
+              Удалить дубликаты
+            </button>
+            <button id="delete-selected" class="button danger-button" disabled>
+              Удалить выбранные
+            </button>
+            <button id="edit-selected" class="button primary-button" disabled>
+              Редактировать выбранную
+            </button>
+            <button id="download-csv" class="button success-button">
+              Скачать CSV
+            </button>
+            <button id="show-raw-editor" class="button primary-button">
+              Raw редактор
+            </button>
+          </div>
+
+          <div class="search-container">
+            <input
+              type="text"
+              id="search"
+              class="search-input"
+              placeholder="Нечеткий поиск по любому полю..."
+            />
+            <div id="filter-info"></div>
+          </div>
+
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th class="checkbox-cell">
+                    <input type="checkbox" id="select-all" />
+                  </th>
+                  <th>Название</th>
+                  <th>Логин</th>
+                  <th>URL</th>
+                  <th>Папка</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="data-table">
+                <!-- Data rows will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="raw-editor-section" class="hidden">
+          <h3>Raw редактор CSV</h3>
+          <p>Редактируйте CSV напрямую в текстовом формате:</p>
+          <textarea id="raw-editor" class="export-raw"></textarea>
+          <div class="button-group">
+            <button id="save-raw" class="button success-button">
+              Применить изменения
+            </button>
+            <button id="cancel-raw" class="button danger-button">Отмена</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="modal-overlay hidden">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Редактировать запись</h3>
+          <button class="modal-close" id="close-modal">&times;</button>
+        </div>
+        <form id="edit-form">
+          <div class="form-group">
+            <label for="edit-name">Название:</label>
+            <input type="text" id="edit-name" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label for="edit-username">Логин:</label>
+            <input type="text" id="edit-username" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label for="edit-password">Пароль:</label>
+            <input type="text" id="edit-password" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label for="edit-url">URL:</label>
+            <input type="text" id="edit-url" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label for="edit-folder">Папка:</label>
+            <input type="text" id="edit-folder" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label for="edit-notes">Заметки:</label>
+            <textarea id="edit-notes" class="form-control"></textarea>
+          </div>
+          <div class="text-right">
+            <button type="submit" class="button success-button">
+              Сохранить
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/6.6.2/fuse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+    <script>
+      // Global variables
+      let originalData = [];
+      let filteredData = [];
+      let fuse = null;
+      let selectedRows = new Set();
+      let currentEditId = null;
+
+      // Elements
+      const dropzone = document.getElementById("dropzone");
+      const fileInput = document.getElementById("csv-file");
+      const uploadSection = document.getElementById("upload-section");
+      const dataSection = document.getElementById("data-section");
+      const rawEditorSection = document.getElementById("raw-editor-section");
+      const dataTable = document.getElementById("data-table");
+      const searchInput = document.getElementById("search");
+      const totalCountSpan = document.getElementById("total-count");
+      const selectedCountSpan = document.getElementById("selected-count");
+      const duplicateCountSpan = document.getElementById("duplicate-count");
+      const selectAllCheckbox = document.getElementById("select-all");
+      const removeButton = document.getElementById("remove-duplicates");
+      const deleteSelectedButton = document.getElementById("delete-selected");
+      const editSelectedButton = document.getElementById("edit-selected");
+      const downloadButton = document.getElementById("download-csv");
+      const showRawEditorButton = document.getElementById("show-raw-editor");
+      const rawEditor = document.getElementById("raw-editor");
+      const saveRawButton = document.getElementById("save-raw");
+      const cancelRawButton = document.getElementById("cancel-raw");
+      const editModal = document.getElementById("edit-modal");
+      const closeModalButton = document.getElementById("close-modal");
+      const editForm = document.getElementById("edit-form");
+      const filterInfo = document.getElementById("filter-info");
+
+      // Init
+      document.addEventListener("DOMContentLoaded", init);
+
+      function init() {
+        // Гарантируем, что модальное окно редактирования скрыто при загрузке
+        editModal.classList.add("hidden");
+
+        // Event listeners
+        dropzone.addEventListener("click", () => fileInput.click());
+        dropzone.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          dropzone.classList.add("active");
+        });
+        dropzone.addEventListener("dragleave", () =>
+          dropzone.classList.remove("active")
+        );
+        dropzone.addEventListener("drop", handleFileDrop);
+        fileInput.addEventListener("change", handleFileSelect);
+
+        searchInput.addEventListener("input", filterData);
+        selectAllCheckbox.addEventListener("change", handleSelectAll);
+
+        removeButton.addEventListener("click", removeDuplicates);
+        deleteSelectedButton.addEventListener("click", deleteSelected);
+        editSelectedButton.addEventListener("click", () => {
+          if (selectedRows.size === 1) {
+            const id = [...selectedRows][0];
+            const item = originalData.find((d) => d._id === id);
+            if (item) {
+              showEditModal(item);
+            }
+          }
+        });
+        downloadButton.addEventListener("click", downloadCSV);
+        showRawEditorButton.addEventListener("click", showRawEditor);
+        saveRawButton.addEventListener("click", saveRawEdits);
+        cancelRawButton.addEventListener("click", cancelRawEdits);
+
+        closeModalButton.addEventListener("click", () =>
+          editModal.classList.add("hidden")
+        );
+        editForm.addEventListener("submit", handleFormSubmit);
+
+        // Закрытие модального окна при клике вне его
+        document.addEventListener("click", (event) => {
+          if (event.target === editModal) {
+            editModal.classList.add("hidden");
+          }
+        });
+      }
+
+      // Handle file drop
+      function handleFileDrop(e) {
+        e.preventDefault();
+        dropzone.classList.remove("active");
+
+        if (e.dataTransfer.files.length) {
+          processFile(e.dataTransfer.files[0]);
+        }
+      }
+
+      // Handle file select
+      function handleFileSelect(e) {
+        if (fileInput.files.length) {
+          processFile(fileInput.files[0]);
+        }
+      }
+
+      // Process uploaded file
+      function processFile(file) {
+        if (file.type !== "text/csv" && !file.name.endsWith(".csv")) {
+          showToast("Ошибка: Пожалуйста, загрузите файл CSV", "error");
+          return;
+        }
+
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (result) => {
+            console.log("Parsed CSV data:", result.data[0]); // Для отладки
+            if (result.data && result.data.length) {
+              processData(result.data);
+            } else {
+              showToast("Ошибка: Файл не содержит данных", "error");
+            }
+          },
+          error: (error) => {
+            showToast(`Ошибка обработки файла: ${error.message}`, "error");
+          },
+        });
+      }
+
+      // Process parsed data
+      function processData(data) {
+        console.log("Processing data with fields:", Object.keys(data[0])); // Для отладки
+
+        originalData = data.map((item, index) => ({
+          ...item,
+          _id: `id_${index}`,
+          _duplicate: false,
+        }));
+
+        // Нормализуем данные - добавим свойства для внутреннего использования приложения,
+        // но сохраним оригинальные поля Bitwarden для экспорта
+        originalData = originalData.map((item) => {
+          return {
+            ...item, // Сохраняем все оригинальные поля
+            _id: item._id,
+            _duplicate: item._duplicate,
+            // Добавляем алиасы для более удобного доступа в приложении
+            username: item.login_username || "",
+            password: item.login_password || "",
+            url: item.login_uri || "",
+          };
+        });
+
+        // Setup fuzzy search
+        setupFuseSearch();
+
+        // Mark duplicates
+        markDuplicates();
+
+        // Show data section
+        uploadSection.classList.add("hidden");
+        dataSection.classList.remove("hidden");
+
+        // Display data
+        filteredData = [...originalData];
+        renderTable();
+        updateCounts();
+
+        console.log("Processed data sample:", originalData[0]); // Для отладки
+      }
+
+      // Setup fuzzy search
+      function setupFuseSearch() {
+        const options = {
+          includeScore: true,
+          keys: ["name", "login_username", "login_uri", "folder", "notes"],
+          threshold: 0.4,
+        };
+
+        fuse = new Fuse(originalData, options);
+      }
+
+      // Mark duplicate entries
+      function markDuplicates() {
+        const seen = new Map();
+        let duplicateCount = 0;
+
+        originalData.forEach((item) => {
+          // Create a unique key for comparison based on relevant fields
+          const key = `${item.name}|${item.login_username}|${item.login_uri}`;
+
+          if (seen.has(key)) {
+            item._duplicate = true;
+            duplicateCount++;
+          } else {
+            seen.set(key, true);
+            item._duplicate = false;
+          }
+        });
+
+        return duplicateCount;
+      }
+
+      // Render table with data
+      function renderTable() {
+        dataTable.innerHTML = "";
+
+        filteredData.forEach((item) => {
+          const row = document.createElement("tr");
+          if (item._duplicate) {
+            row.style.backgroundColor = "#FFF3F3";
+          }
+
+          // Checkbox cell
+          const checkboxCell = document.createElement("td");
+          checkboxCell.className = "checkbox-cell";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = selectedRows.has(item._id);
+          checkbox.addEventListener("change", () => {
+            handleRowSelect(item._id, checkbox.checked);
+          });
+          checkboxCell.appendChild(checkbox);
+          row.appendChild(checkboxCell);
+
+          // Name cell
+          const nameCell = document.createElement("td");
+          nameCell.textContent = item.name || "";
+          row.appendChild(nameCell);
+
+          // Username cell
+          const usernameCell = document.createElement("td");
+          usernameCell.textContent = item.login_username || "";
+          row.appendChild(usernameCell);
+
+          // URL cell
+          const urlCell = document.createElement("td");
+          urlCell.textContent = item.login_uri || "";
+          row.appendChild(urlCell);
+
+          // Folder cell
+          const folderCell = document.createElement("td");
+          folderCell.textContent = item.folder || "";
+          row.appendChild(folderCell);
+
+          // Actions cell
+          const actionsCell = document.createElement("td");
+
+          const editButton = document.createElement("button");
+          editButton.className = "button primary-button";
+          editButton.textContent = "Изменить";
+          editButton.style.marginRight = "0.5rem";
+          editButton.addEventListener("click", () => showEditModal(item));
+          actionsCell.appendChild(editButton);
+
+          const deleteButton = document.createElement("button");
+          deleteButton.className = "button danger-button";
+          deleteButton.textContent = "Удалить";
+          deleteButton.addEventListener("click", () => {
+            originalData = originalData.filter((d) => d._id !== item._id);
+            filterData();
+            showToast("Запись удалена");
+          });
+          actionsCell.appendChild(deleteButton);
+
+          row.appendChild(actionsCell);
+
+          dataTable.appendChild(row);
+        });
+      }
+
+      // Filter data with fuzzy search
+      function filterData() {
+        const searchTerm = searchInput.value.trim();
+
+        if (searchTerm === "") {
+          filteredData = [...originalData];
+          filterInfo.innerHTML = "";
+        } else {
+          const results = fuse.search(searchTerm);
+          filteredData = results.map((result) => result.item);
+          filterInfo.innerHTML = `<span class="filter-indicator">Отфильтровано: ${filteredData.length} из ${originalData.length}</span>`;
+        }
+
+        // Reset selection
+        selectedRows.clear();
+        selectAllCheckbox.checked = false;
+
+        renderTable();
+        updateCounts();
+        updateButtons();
+      }
+
+      // Handle row selection
+      function handleRowSelect(id, isSelected) {
+        if (isSelected) {
+          selectedRows.add(id);
+        } else {
+          selectedRows.delete(id);
+        }
+
+        updateCounts();
+        updateButtons();
+      }
+
+      // Handle select all checkbox
+      function handleSelectAll() {
+        if (selectAllCheckbox.checked) {
+          filteredData.forEach((item) => {
+            selectedRows.add(item._id);
+          });
+        } else {
+          filteredData.forEach((item) => {
+            selectedRows.delete(item._id);
+          });
+        }
+
+        renderTable();
+        updateCounts();
+        updateButtons();
+      }
+
+      // Remove duplicates
+      function removeDuplicates() {
+        const seen = new Map();
+        const deduplicated = [];
+
+        originalData.forEach((item) => {
+          const key = `${item.name}|${item.login_username}|${item.login_uri}`;
+
+          if (!seen.has(key)) {
+            seen.set(key, true);
+            item._duplicate = false;
+            deduplicated.push(item);
+          }
+        });
+
+        const removedCount = originalData.length - deduplicated.length;
+        originalData = deduplicated;
+
+        selectedRows.clear();
+        filterData();
+        showToast(`Удалено ${removedCount} дубликатов`);
+      }
+
+      // Delete selected rows
+      function deleteSelected() {
+        if (selectedRows.size === 0) return;
+
+        originalData = originalData.filter(
+          (item) => !selectedRows.has(item._id)
+        );
+        selectedRows.clear();
+
+        filterData();
+        showToast("Выбранные записи удалены");
+      }
+
+      // Show edit modal
+      function showEditModal(item) {
+        currentEditId = item._id;
+
+        console.log("Showing modal for item:", item); // Для отладки
+
+        document.getElementById("edit-name").value = item.name || "";
+        document.getElementById("edit-username").value =
+          item.login_username || "";
+        document.getElementById("edit-password").value =
+          item.login_password || "";
+        document.getElementById("edit-url").value = item.login_uri || "";
+        document.getElementById("edit-folder").value = item.folder || "";
+        document.getElementById("edit-notes").value = item.notes || "";
+
+        editModal.classList.remove("hidden");
+      }
+
+      // Handle form submit
+      function handleFormSubmit(e) {
+        e.preventDefault();
+
+        if (!currentEditId) return;
+
+        const item = originalData.find((d) => d._id === currentEditId);
+        if (!item) return;
+
+        item.name = document.getElementById("edit-name").value;
+        item.login_username = document.getElementById("edit-username").value;
+        item.login_password = document.getElementById("edit-password").value;
+        item.login_uri = document.getElementById("edit-url").value;
+        item.folder = document.getElementById("edit-folder").value;
+        item.notes = document.getElementById("edit-notes").value;
+
+        // Обновляем также алиасы для внутреннего использования
+        item.username = item.login_username;
+        item.password = item.login_password;
+        item.url = item.login_uri;
+
+        editModal.classList.add("hidden");
+        filterData();
+        showToast("Запись обновлена");
+      }
+
+      // Download CSV
+      function downloadCSV() {
+        // Создаем копию данных без внутренних полей
+        const exportData = originalData.map((item) => {
+          const { _id, _duplicate, username, password, url, ...exportItem } =
+            item;
+          return exportItem;
+        });
+
+        const csv = Papa.unparse(exportData);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        saveAs(blob, "bitwarden_edited.csv");
+
+        showToast("Файл CSV скачан");
+      }
+
+      // Show raw editor
+      function showRawEditor() {
+        // Создаем копию данных без внутренних полей
+        const exportData = originalData.map((item) => {
+          const { _id, _duplicate, username, password, url, ...exportItem } =
+            item;
+          return exportItem;
+        });
+
+        const csv = Papa.unparse(exportData);
+        rawEditor.value = csv;
+
+        dataSection.classList.add("hidden");
+        rawEditorSection.classList.remove("hidden");
+      }
+
+      // Save raw edits
+      function saveRawEdits() {
+        try {
+          const result = Papa.parse(rawEditor.value, {
+            header: true,
+            skipEmptyLines: true,
+          });
+
+          if (result.data && result.data.length) {
+            processData(result.data);
+            rawEditorSection.classList.add("hidden");
+            dataSection.classList.remove("hidden");
+
+            showToast("Изменения сохранены");
+          } else {
+            showToast("Ошибка: Неверный формат CSV", "error");
+          }
+        } catch (error) {
+          showToast(`Ошибка обработки CSV: ${error.message}`, "error");
+        }
+      }
+
+      // Cancel raw edits
+      function cancelRawEdits() {
+        rawEditorSection.classList.add("hidden");
+        dataSection.classList.remove("hidden");
+      }
+
+      // Update counts display
+      function updateCounts() {
+        totalCountSpan.textContent = originalData.length;
+        selectedCountSpan.textContent = selectedRows.size;
+
+        const duplicateCount = originalData.filter(
+          (item) => item._duplicate
+        ).length;
+        duplicateCountSpan.textContent = duplicateCount;
+      }
+
+      // Update button states
+      function updateButtons() {
+        deleteSelectedButton.disabled = selectedRows.size === 0;
+        editSelectedButton.disabled = selectedRows.size !== 1;
+      }
+
+      // Show toast notification
+      function showToast(message, type = "success") {
+        const toast = document.createElement("div");
+        toast.className = "toast";
+        toast.textContent = message;
+
+        if (type === "error") {
+          toast.style.borderColor = "var(--danger-color)";
+        }
+
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+          toast.remove();
+        }, 3000);
+      }
+    </script>
+  </body>
+</html>
