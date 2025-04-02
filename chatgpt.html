@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Bitwarden CSV Deduplicator</title>
+  <!-- Подключаем библиотеки PapaParse и Fuse.js с CDN -->
+  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" integrity="sha512-i7BYRQ0jdyQhI9YVE7sCRebGjq+LmSgJav3c6hfcybXXDbzybEh2M5Uae7f5rLL7E1y8cb4VbCnIl3AroI/BXQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script> -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.2/papaparse.min.js"></script>
+  <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/6.6.2/fuse.min.js" integrity="sha512-+K9iCmyfP6ssvA8zE6E1prwBfa1Qp46KkD/h6OpO6y/8iNgy6Gbv/wGZch0gWNv8lyf9Fv04Jnw7RSIyWfLOAw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script> -->
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    h1 { margin-bottom: 20px; }
+    #controls { margin-bottom: 20px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+    input[type="text"] { padding: 5px; width: 200px; }
+    button { padding: 5px 10px; margin-right: 5px; }
+    .editable { background-color: #ffffe0; }
+  </style>
+</head>
+<body>
+  <h1>Bitwarden CSV Deduplicator</h1>
+  <div id="controls">
+    <!-- Загрузка CSV-файла -->
+    <input type="file" id="csvFileInput" accept=".csv">
+    <!-- Кнопка для удаления дубликатов -->
+    <button id="removeDuplicatesBtn" disabled>Удалить дубликаты</button>
+    <!-- Поле поиска -->
+    <input type="text" id="searchInput" placeholder="Fuzzy поиск...">
+    <!-- Кнопки для массовых операций -->
+    <button id="selectAllBtn" disabled>Выбрать все найденные</button>
+    <button id="deleteSelectedBtn" disabled>Удалить выбранные</button>
+    <!-- Кнопка для скачивания результата -->
+    <button id="downloadBtn" disabled>Скачать CSV</button>
+  </div>
+  <div id="tableContainer"></div>
+
+  <script>
+    // Глобальные переменные
+    let originalData = [];    // Исходные данные из CSV
+    let filteredData = [];    // Данные после фильтрации
+    let fuse = null;          // Объект Fuse.js для fuzzy поиска
+    let csvHeaders = [];      // Заголовки CSV
+    let selectedIds = new Set(); // Множество выбранных записей (по их уникальным id)
+
+    // Функция для присвоения уникальных ID записям (если их нет)
+    function assignUniqueIds(data) {
+      return data.map((item, index) => {
+        if (!item.__id) {
+          item.__id = index + '-' + Date.now();
+        }
+        return item;
+      });
+    }
+
+    // Функция для отрисовки таблицы с данными
+    function renderTable(data) {
+      const container = document.getElementById('tableContainer');
+      container.innerHTML = ''; // Очистка контейнера
+
+      if (data.length === 0) {
+        container.innerHTML = '<p>Нет данных для отображения.</p>';
+        return;
+      }
+
+      // Создаем таблицу и заголовок
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+
+      // Колонка для чекбоксов
+      const selectTh = document.createElement('th');
+      selectTh.textContent = 'Выбрать';
+      headerRow.appendChild(selectTh);
+
+      // Создаем заголовки на основе CSV (без нашего служебного __id)
+      csvHeaders.forEach(header => {
+        const th = document.createElement('th');
+        th.textContent = header;
+        headerRow.appendChild(th);
+      });
+
+      // Колонка для действий (удаление/редактирование)
+      const actionTh = document.createElement('th');
+      actionTh.textContent = 'Действия';
+      headerRow.appendChild(actionTh);
+
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // Формируем тело таблицы
+      const tbody = document.createElement('tbody');
+      data.forEach(item => {
+        const row = document.createElement('tr');
+        row.setAttribute('data-id', item.__id);
+
+        // Чекбокс для выбора записи
+        const checkboxTd = document.createElement('td');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = selectedIds.has(item.__id);
+        checkbox.addEventListener('change', function() {
+          if (this.checked) {
+            selectedIds.add(item.__id);
+          } else {
+            selectedIds.delete(item.__id);
+          }
+          updateActionButtons();
+        });
+        checkboxTd.appendChild(checkbox);
+        row.appendChild(checkboxTd);
+
+        // Создаем ячейки для каждого поля с возможностью редактирования
+        csvHeaders.forEach(header => {
+          const td = document.createElement('td');
+          td.textContent = item[header] || '';
+          td.contentEditable = "true";
+          td.classList.add('editable');
+          // При изменении содержимого обновляем данные
+          td.addEventListener('input', function() {
+            item[header] = this.textContent;
+          });
+          row.appendChild(td);
+        });
+
+        // Кнопка удаления отдельной записи
+        const actionsTd = document.createElement('td');
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'Удалить';
+        deleteBtn.addEventListener('click', function() {
+          deleteRecord(item.__id);
+        });
+        actionsTd.appendChild(deleteBtn);
+        row.appendChild(actionsTd);
+
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(tbody);
+      container.appendChild(table);
+      updateActionButtons();
+    }
+
+    // Обновляем состояние кнопок массовых операций
+    function updateActionButtons() {
+      const selectAllBtn = document.getElementById('selectAllBtn');
+      const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+      selectAllBtn.disabled = filteredData.length === 0;
+      deleteSelectedBtn.disabled = selectedIds.size === 0;
+    }
+
+    // Удаление записи по уникальному ID
+    function deleteRecord(id) {
+      originalData = originalData.filter(item => item.__id !== id);
+      selectedIds.delete(id);
+      updateFuse();
+      performSearch();
+    }
+
+    // Функция удаления всех выбранных записей
+    function deleteSelectedRecords() {
+      originalData = originalData.filter(item => !selectedIds.has(item.__id));
+      selectedIds.clear();
+      updateFuse();
+      performSearch();
+    }
+
+    // Функция для удаления дубликатов
+    function removeDuplicates() {
+      const uniqueMap = {};
+      originalData.forEach(item => {
+        // Формируем ключ на основе всех полей (можно модифицировать, если нужно сравнивать не все поля)
+        const key = csvHeaders.map(header => (item[header] || '').trim().toLowerCase()).join('|');
+        if (!uniqueMap[key]) {
+          uniqueMap[key] = item;
+        }
+      });
+      originalData = Object.values(uniqueMap);
+      selectedIds.clear();
+      updateFuse();
+      performSearch();
+    }
+
+    // Обновление объекта Fuse.js после изменения данных
+    function updateFuse() {
+      if (originalData.length > 0) {
+        fuse = new Fuse(originalData, {
+          keys: csvHeaders,
+          threshold: 0.4, // чувствительность fuzzy поиска
+          includeScore: true
+        });
+      }
+    }
+
+    // Функция выполнения поиска
+    function performSearch() {
+      const query = document.getElementById('searchInput').value.trim();
+      if (query && fuse) {
+        const results = fuse.search(query);
+        filteredData = results.map(result => result.item);
+      } else {
+        filteredData = originalData.slice();
+      }
+      renderTable(filteredData);
+    }
+
+    // Выбираем все записи из текущего результата поиска
+    function selectAllFiltered() {
+      filteredData.forEach(item => {
+        selectedIds.add(item.__id);
+      });
+      renderTable(filteredData);
+    }
+
+    // Функция скачивания CSV-файла с текущими данными
+    function downloadCSV() {
+      const csv = Papa.unparse(originalData, { columns: csvHeaders });
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'bitwarden_cleaned.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Обработчик загрузки CSV-файла
+    document.getElementById('csvFileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          originalData = assignUniqueIds(results.data);
+          // Определяем заголовки из первой записи (исключая служебное __id)
+          if (originalData.length > 0) {
+            csvHeaders = Object.keys(originalData[0]).filter(key => key !== '__id');
+          }
+          updateFuse();
+          performSearch();
+          // Активируем кнопки после загрузки
+          document.getElementById('removeDuplicatesBtn').disabled = false;
+          document.getElementById('downloadBtn').disabled = false;
+        },
+        error: function(err) {
+          console.error('Ошибка парсинга CSV:', err);
+        }
+      });
+    });
+
+    // Привязка событий к кнопкам
+    document.getElementById('removeDuplicatesBtn').addEventListener('click', function() {
+      removeDuplicates();
+    });
+
+    document.getElementById('searchInput').addEventListener('input', function() {
+      performSearch();
+    });
+
+    document.getElementById('selectAllBtn').addEventListener('click', function() {
+      selectAllFiltered();
+    });
+
+    document.getElementById('deleteSelectedBtn').addEventListener('click', function() {
+      if (confirm('Удалить выбранные записи?')) {
+        deleteSelectedRecords();
+      }
+    });
+
+    document.getElementById('downloadBtn').addEventListener('click', function() {
+      downloadCSV();
+    });
+  </script>
+</body>
+</html>

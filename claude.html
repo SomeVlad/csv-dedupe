@@ -328,9 +328,6 @@
             <button id="delete-selected" class="button danger-button" disabled>
               Удалить выбранные
             </button>
-            <button id="edit-selected" class="button primary-button" disabled>
-              Редактировать выбранную
-            </button>
             <button id="download-csv" class="button success-button">
               Скачать CSV
             </button>
@@ -452,7 +449,6 @@
       const selectAllCheckbox = document.getElementById("select-all");
       const removeButton = document.getElementById("remove-duplicates");
       const deleteSelectedButton = document.getElementById("delete-selected");
-      const editSelectedButton = document.getElementById("edit-selected");
       const downloadButton = document.getElementById("download-csv");
       const showRawEditorButton = document.getElementById("show-raw-editor");
       const rawEditor = document.getElementById("raw-editor");
@@ -487,15 +483,6 @@
 
         removeButton.addEventListener("click", removeDuplicates);
         deleteSelectedButton.addEventListener("click", deleteSelected);
-        editSelectedButton.addEventListener("click", () => {
-          if (selectedRows.size === 1) {
-            const id = [...selectedRows][0];
-            const item = originalData.find((d) => d._id === id);
-            if (item) {
-              showEditModal(item);
-            }
-          }
-        });
         downloadButton.addEventListener("click", downloadCSV);
         showRawEditorButton.addEventListener("click", showRawEditor);
         saveRawButton.addEventListener("click", saveRawEdits);
@@ -686,6 +673,7 @@
           deleteButton.textContent = "Удалить";
           deleteButton.addEventListener("click", () => {
             originalData = originalData.filter((d) => d._id !== item._id);
+            if (fuse) fuse.setCollection(originalData);
             filterData();
             showToast("Запись удалена");
           });
@@ -765,6 +753,7 @@
 
         const removedCount = originalData.length - deduplicated.length;
         originalData = deduplicated;
+        if (fuse) fuse.setCollection(originalData);
 
         selectedRows.clear();
         filterData();
@@ -778,6 +767,7 @@
         originalData = originalData.filter(
           (item) => !selectedRows.has(item._id)
         );
+        if (fuse) fuse.setCollection(originalData);
         selectedRows.clear();
 
         filterData();
@@ -902,7 +892,6 @@
       // Update button states
       function updateButtons() {
         deleteSelectedButton.disabled = selectedRows.size === 0;
-        editSelectedButton.disabled = selectedRows.size !== 1;
       }
 
       // Show toast notification
