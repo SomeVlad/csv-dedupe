@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Bitwarden CSV Deduplicator</title>
+    <!-- Подключаем библиотеки PapaParse и Fuse.js с CDN -->
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js" integrity="sha512-i7BYRQ0jdyQhI9YVE7sCRebGjq+LmSgJav3c6hfcybXXDbzybEh2M5Uae7f5rLL7E1y8cb4VbCnIl3AroI/BXQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.2/papaparse.min.js"></script>
+    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/6.6.2/fuse.min.js" integrity="sha512-+K9iCmyfP6ssvA8zE6E1prwBfa1Qp46KkD/h6OpO6y/8iNgy6Gbv/wGZch0gWNv8lyf9Fv04Jnw7RSIyWfLOAw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js/dist/fuse.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      h1 {
+        margin-bottom: 20px;
+      }
+      #controls {
+        margin-bottom: 20px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 20px;
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 8px;
+        text-align: left;
+      }
+      th {
+        background-color: #f2f2f2;
+      }
+      input[type="text"] {
+        padding: 5px;
+        width: 200px;
+      }
+      button {
+        padding: 5px 10px;
+        margin-right: 5px;
+      }
+      .editable {
+        background-color: #ffffe0;
+      }
+      .duplicate-group {
+        background-color: #ffe6e6;
+      }
+      .domain-group {
+        background-color: #e6ffe6;
+      }
+      #duplicateStats {
+        margin: 10px 0;
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 5px;
+      }
+      .checkbox-container {
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Bitwarden CSV Deduplicator</h1>
+
+    <div class="checkbox-container">
+      <label
+        ><input type="checkbox" id="groupDomains" checked /> Group by domain and
+        credentials</label
+      >
+      <label
+        ><input type="checkbox" id="exactDuplicatesOnly" /> Exact duplicates
+        only</label
+      >
+    </div>
+
+    <div id="controls">
+      <input type="file" id="csvFileInput" accept=".csv" />
+      <button id="analyzeBtn" disabled>Analyze Data</button>
+      <button id="removeDuplicatesBtn" disabled>Remove Duplicates</button>
+      <button id="mergeDomainsBtn" disabled>Merge Same Domains</button>
+      <input type="text" id="searchInput" placeholder="Fuzzy поиск..." />
+      <button id="selectAllBtn" disabled>Выбрать все найденные</button>
+      <button id="deleteSelectedBtn" disabled>Удалить выбранные</button>
+      <button id="downloadBtn" disabled>Скачать CSV</button>
+    </div>
+
+    <div id="duplicateStats"></div>
+    <div id="tableContainer"></div>
+
+    <script>
+      // Глобальные переменные
+      let originalData = []; // Исходные данные из CSV
+      let filteredData = []; // Данные после фильтрации
+      let fuse = null; // Объект Fuse.js для fuzzy поиска
+      let csvHeaders = []; // Заголовки CSV
+      let selectedIds = new Set(); // Множество выбранных записей (по их уникальным id)
+      let duplicateGroups = []; // Группы дубликатов
+      let domainGroups = []; // Группы по домену и учетным данным
+
+      // Функция для извлечения домена из URL
+      function extractDomain(url) {
+        if (!url) return "";
+
+        // Remove protocol
+        let domain = url.replace(/^https?:\/\//, "");
+
+        // Remove www prefix
+        domain = domain.replace(/^www\./, "");
+
+        // Remove trailing slashes and paths
+        domain = domain.split("/")[0];
+
+        // Remove port if present
+        domain = domain.split(":")[0];
+
+        return domain.toLowerCase();
+      }
+
+      // Функция для получения базового домена (например, google.com из accounts.google.com)
+      function getBaseDomain(domain) {
+        if (!domain) return "";
+
+        const parts = domain.split(".");
+        if (parts.length <= 2) return domain;
+
+        // Get the last two parts (e.g., google.com from accounts.google.com)
+        return parts.slice(-2).join(".");
+      }
+
+      // Функция для присвоения уникальных ID записям
+      function assignUniqueIds(data) {
+        return data.map((item, index) => {
+          if (!item.__id) {
+            item.__id = index + "-" + Date.now();
+          }
+          return item;
+        });
+      }
+
+      // Функция для анализа данных и поиска дубликатов
+      function analyzeData() {
+        const exactDuplicatesOnly = document.getElementById(
+          "exactDuplicatesOnly"
+        ).checked;
+        const groupDomains = document.getElementById("groupDomains").checked;
+
+        // Очищаем предыдущие результаты
+        duplicateGroups = [];
+        domainGroups = [];
+
+        // Шаг 1: Найти точные дубликаты
+        const uniqueMap = new Map();
+        originalData.forEach((item) => {
+          // Создаем ключ, но учитываем только важные для логина поля
+          // Игнорируем служебные поля и поля, которые не важны для идентификации
+          const keyFields = ["login_uri", "login_username", "login_password"];
+          const exactKey = keyFields
+            .map((field) => (item[field] || "").trim().toLowerCase())
+            .join("|");
+
+          if (!uniqueMap.has(exactKey)) {
+            uniqueMap.set(exactKey, [item]);
+          } else {
+            uniqueMap.get(exactKey).push(item);
+          }
+        });
+
+        // Добавляем в группы дубликатов только группы с более чем 1 элементом
+        for (const [key, items] of uniqueMap.entries()) {
+          if (items.length > 1) {
+            duplicateGroups.push(items);
+          }
+        }
+
+        // Шаг 2: Если нужно, группируем по домену и учетным данным
+        if (groupDomains && !exactDuplicatesOnly) {
+          const domainMap = new Map();
+
+          originalData.forEach((item) => {
+            // Извлекаем домен из URL
+            const url = item.login_uri || "";
+            const domain = extractDomain(url);
+            const baseDomain = getBaseDomain(domain);
+
+            // Нормализуем имя пользователя
+            let username = (item.login_username || "").toLowerCase().trim();
+
+            // Извлекаем имя пользователя из поля name, если оно содержит (username) формат
+            if (!username && item.name) {
+              const nameMatch = item.name.match(/\((.*?)\)$/);
+              if (nameMatch && nameMatch[1]) {
+                username = nameMatch[1].toLowerCase().trim();
+              }
+            }
+
+            // Пропускаем записи без домена
+            if (!baseDomain) return;
+
+            const password = item.login_password || "";
+
+            // Ключ для группировки: базовый домен + имя пользователя + пароль
+            const domainKey = `${baseDomain}|${username}|${password}`;
+
+            if (!domainMap.has(domainKey)) {
+              domainMap.set(domainKey, [item]);
+            } else {
+              domainMap.get(domainKey).push(item);
+            }
+          });
+
+          // Отдельно ищем записи, где имя пользователя может быть в поле name
+          originalData.forEach((item) => {
+            if (!item.name || !item.name.includes("(")) return;
+
+            const nameMatch = item.name.match(/\((.*?)\)$/);
+            if (!nameMatch || !nameMatch[1]) return;
+
+            const extractedUsername = nameMatch[1].toLowerCase().trim();
+            const domain = extractDomain(item.login_uri || "");
+            const baseDomain = getBaseDomain(domain);
+            const password = item.login_password || "";
+
+            // Создаем альтернативный ключ с извлеченным именем пользователя
+            const altKey = `${baseDomain}|${extractedUsername}|${password}`;
+
+            if (
+              domainMap.has(altKey) &&
+              domainMap.get(altKey)[0].__id !== item.__id
+            ) {
+              // Если у нас уже есть запись с таким ключом, добавляем текущую запись к этой группе
+              domainMap.get(altKey).push(item);
+            }
+          });
+
+          // Добавляем группы с более чем 1 элементом
+          for (const [key, items] of domainMap.entries()) {
+            if (items.length > 1) {
+              // Проверяем, что эта группа не дублирует уже найденную группу
+              if (!isDuplicateGroup(items, domainGroups)) {
+                domainGroups.push(items);
+              }
+            }
+          }
+
+          // Дополнительно проверяем записи с одинаковыми доменами и паролями,
+          // но разными способами записи имени пользователя
+          findSimilarCredentials();
+        }
+
+        // Обновляем статистику и таблицу
+        renderStats();
+        renderTable(filteredData);
+      }
+
+      // Проверка, является ли группа дубликатом другой группы
+      function isDuplicateGroup(items, groups) {
+        const itemIds = new Set(items.map((item) => item.__id));
+
+        for (const group of groups) {
+          const groupIds = new Set(group.map((item) => item.__id));
+
+          // Если все элементы совпадают, значит группа уже существует
+          if (
+            itemIds.size === groupIds.size &&
+            [...itemIds].every((id) => groupIds.has(id))
+          ) {
+            return true;
+          }
+        }
+
+        return false;
+      }
+
+      // Функция для нахождения похожих учетных данных
+      function findSimilarCredentials() {
+        // Создаем структуру, группирующую записи по домену и паролю
+        const domainPasswordMap = new Map();
+
+        originalData.forEach((item) => {
+          const domain = extractDomain(item.login_uri || "");
+          const baseDomain = getBaseDomain(domain);
+          const password = item.login_password || "";
+
+          if (!baseDomain || !password) return;
+
+          const key = `${baseDomain}|${password}`;
+
+          if (!domainPasswordMap.has(key)) {
+            domainPasswordMap.set(key, []);
+          }
+
+          domainPasswordMap.get(key).push(item);
+        });
+
+        // Для групп с несколькими записями, проверяем похожесть имен пользователей
+        for (const [key, items] of domainPasswordMap.entries()) {
+          if (items.length <= 1) continue;
+
+          // Получаем все имена пользователей для этой группы
+          const usernames = items.map((item) => {
+            let username = item.login_username || "";
+
+            // Пытаемся извлечь имя пользователя из поля name
+            if (item.name && item.name.includes("(")) {
+              const nameMatch = item.name.match(/\((.*?)\)$/);
+              if (nameMatch && nameMatch[1]) {
+                username = nameMatch[1];
+              }
+            }
+
+            return username.toLowerCase().trim();
+          });
+
+          // Если у нас есть несколько записей с одинаковым именем пользователя
+          const usernameCount = {};
+          usernames.forEach((username) => {
+            if (!username) return;
+            usernameCount[username] = (usernameCount[username] || 0) + 1;
+          });
+
+          // Если есть повторяющиеся имена пользователей, создаем группу
+          const hasDuplicates = Object.values(usernameCount).some(
+            (count) => count > 1
+          );
+          if (hasDuplicates) {
+            // Группируем элементы по имени пользователя
+            const usernameGroups = {};
+            items.forEach((item, index) => {
+              const username = usernames[index];
+              if (!username) return;
+
+              if (!usernameGroups[username]) {
+                usernameGroups[username] = [];
+              }
+
+              usernameGroups[username].push(item);
+            });
+
+            // Добавляем группы с более чем 1 элементом
+            for (const username in usernameGroups) {
+              const group = usernameGroups[username];
+              if (group.length > 1 && !isDuplicateGroup(group, domainGroups)) {
+                domainGroups.push(group);
+              }
+            }
+          }
+        }
+      }
+
+      // Функция для отображения статистики
+      function renderStats() {
+        const container = document.getElementById("duplicateStats");
+
+        const exactDuplicates =
+          duplicateGroups.reduce((sum, group) => sum + group.length, 0) -
+          duplicateGroups.length;
+        const domainDuplicates =
+          domainGroups.reduce((sum, group) => sum + group.length, 0) -
+          domainGroups.length;
+
+        container.innerHTML = `
+        <strong>Statistics:</strong>
+        <ul>
+          <li>Total entries: ${originalData.length}</li>
+          <li>Exact duplicates: ${exactDuplicates} (in ${duplicateGroups.length} groups)</li>
+          <li>Same domain & credentials: ${domainDuplicates} (in ${domainGroups.length} groups)</li>
+        </ul>
+      `;
+      }
+
+      // Функция для отрисовки таблицы с данными
+      function renderTable(data) {
+        const container = document.getElementById("tableContainer");
+        container.innerHTML = ""; // Очистка контейнера
+
+        if (data.length === 0) {
+          container.innerHTML = "<p>Нет данных для отображения.</p>";
+          return;
+        }
+
+        // Создаем таблицу и заголовок
+        const table = document.createElement("table");
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+
+        // Колонка для чекбоксов
+        const selectTh = document.createElement("th");
+        selectTh.textContent = "Выбрать";
+        headerRow.appendChild(selectTh);
+
+        // Колонка для группы
+        const groupTh = document.createElement("th");
+        groupTh.textContent = "Группа";
+        headerRow.appendChild(groupTh);
+
+        // Создаем заголовки на основе CSV (без нашего служебного __id)
+        csvHeaders.forEach((header) => {
+          const th = document.createElement("th");
+          th.textContent = header;
+          headerRow.appendChild(th);
+        });
+
+        // Колонка для действий
+        const actionTh = document.createElement("th");
+        actionTh.textContent = "Действия";
+        headerRow.appendChild(actionTh);
+
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        // Формируем тело таблицы
+        const tbody = document.createElement("tbody");
+        data.forEach((item) => {
+          const row = document.createElement("tr");
+          row.setAttribute("data-id", item.__id);
+
+          // Добавляем класс для дубликатов и групп по домену
+          const isDuplicate = duplicateGroups.some(
+            (group) =>
+              group.some((g) => g.__id === item.__id) && group.length > 1
+          );
+
+          const isDomainGroup = domainGroups.some(
+            (group) =>
+              group.some((g) => g.__id === item.__id) && group.length > 1
+          );
+
+          if (isDuplicate) {
+            row.classList.add("duplicate-group");
+          } else if (isDomainGroup) {
+            row.classList.add("domain-group");
+          }
+
+          // Чекбокс для выбора записи
+          const checkboxTd = document.createElement("td");
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = selectedIds.has(item.__id);
+          checkbox.addEventListener("change", function () {
+            if (this.checked) {
+              selectedIds.add(item.__id);
+            } else {
+              selectedIds.delete(item.__id);
+            }
+            updateActionButtons();
+          });
+          checkboxTd.appendChild(checkbox);
+          row.appendChild(checkboxTd);
+
+          // Ячейка для группы
+          const groupTd = document.createElement("td");
+          if (isDuplicate) {
+            groupTd.textContent = "Дубликат";
+          } else if (isDomainGroup) {
+            groupTd.textContent = "Домен";
+          }
+          row.appendChild(groupTd);
+
+          // Создаем ячейки для каждого поля с возможностью редактирования
+          csvHeaders.forEach((header) => {
+            const td = document.createElement("td");
+
+            // Для URL показываем только домен, но сохраняем полный URL как title
+            if (header === "login_uri") {
+              const domain = extractDomain(item[header]);
+              td.setAttribute("title", item[header] || "");
+              td.textContent = domain || item[header] || "";
+            } else {
+              td.textContent = item[header] || "";
+            }
+
+            td.contentEditable = "true";
+            td.classList.add("editable");
+
+            // При изменении содержимого обновляем данные
+            td.addEventListener("input", function () {
+              item[header] = this.textContent;
+            });
+            row.appendChild(td);
+          });
+
+          // Кнопка удаления отдельной записи
+          const actionsTd = document.createElement("td");
+          const deleteBtn = document.createElement("button");
+          deleteBtn.textContent = "Удалить";
+          deleteBtn.addEventListener("click", function () {
+            deleteRecord(item.__id);
+          });
+          actionsTd.appendChild(deleteBtn);
+          row.appendChild(actionsTd);
+
+          tbody.appendChild(row);
+        });
+
+        table.appendChild(tbody);
+        container.appendChild(table);
+        updateActionButtons();
+      }
+
+      // Обновляем состояние кнопок массовых операций
+      function updateActionButtons() {
+        const selectAllBtn = document.getElementById("selectAllBtn");
+        const deleteSelectedBtn = document.getElementById("deleteSelectedBtn");
+        selectAllBtn.disabled = filteredData.length === 0;
+        deleteSelectedBtn.disabled = selectedIds.size === 0;
+      }
+
+      // Удаление записи по уникальному ID
+      function deleteRecord(id) {
+        originalData = originalData.filter((item) => item.__id !== id);
+        selectedIds.delete(id);
+        updateFuse();
+        analyzeData();
+        performSearch();
+      }
+
+      // Функция удаления всех выбранных записей
+      function deleteSelectedRecords() {
+        originalData = originalData.filter(
+          (item) => !selectedIds.has(item.__id)
+        );
+        selectedIds.clear();
+        updateFuse();
+        analyzeData();
+        performSearch();
+      }
+
+      // Функция для удаления дубликатов
+      function removeDuplicates() {
+        // Для каждой группы дубликатов оставляем только первый элемент
+        duplicateGroups.forEach((group) => {
+          if (group.length <= 1) return;
+
+          // Удаляем все элементы, кроме первого
+          for (let i = 1; i < group.length; i++) {
+            originalData = originalData.filter(
+              (item) => item.__id !== group[i].__id
+            );
+            selectedIds.delete(group[i].__id);
+          }
+        });
+
+        updateFuse();
+        analyzeData();
+        performSearch();
+      }
+
+      // Функция для объединения записей с одинаковым доменом и учетными данными
+      function mergeDomainGroups() {
+        // Для каждой группы доменов оставляем первую запись,
+        // но объединяем URL через запятую
+        domainGroups.forEach((group) => {
+          if (group.length <= 1) return;
+
+          // Первая запись будет основной
+          const mainItem = group[0];
+
+          // Объединяем URL из всех записей группы
+          const allUris = group.map((item) => item.login_uri).filter(Boolean);
+          mainItem.login_uri = allUris.join(",");
+
+          // Удаляем остальные записи
+          for (let i = 1; i < group.length; i++) {
+            originalData = originalData.filter(
+              (item) => item.__id !== group[i].__id
+            );
+            selectedIds.delete(group[i].__id);
+          }
+        });
+
+        updateFuse();
+        analyzeData();
+        performSearch();
+      }
+
+      // Обновление объекта Fuse.js после изменения данных
+      function updateFuse() {
+        if (originalData.length > 0) {
+          fuse = new Fuse(originalData, {
+            keys: csvHeaders,
+            threshold: 0.4, // чувствительность fuzzy поиска
+            includeScore: true,
+          });
+        }
+      }
+
+      // Функция выполнения поиска
+      function performSearch() {
+        const query = document.getElementById("searchInput").value.trim();
+        if (query && fuse) {
+          const results = fuse.search(query);
+          filteredData = results.map((result) => result.item);
+        } else {
+          filteredData = originalData.slice();
+        }
+        renderTable(filteredData);
+      }
+
+      // Выбираем все записи из текущего результата поиска
+      function selectAllFiltered() {
+        filteredData.forEach((item) => {
+          selectedIds.add(item.__id);
+        });
+        renderTable(filteredData);
+      }
+
+      // Функция скачивания CSV-файла с текущими данными
+      function downloadCSV() {
+        // Убираем служебное поле __id перед экспортом
+        const exportData = originalData.map((item) => {
+          const newItem = { ...item };
+          delete newItem.__id;
+          return newItem;
+        });
+
+        const csv = Papa.unparse(exportData, { columns: csvHeaders });
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "bitwarden_cleaned.csv";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      // Обработчик загрузки CSV-файла
+      document
+        .getElementById("csvFileInput")
+        .addEventListener("change", function (e) {
+          const file = e.target.files[0];
+          if (!file) return;
+
+          Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: function (results) {
+              originalData = assignUniqueIds(results.data);
+
+              // Определяем заголовки из первой записи (исключая служебное __id)
+              if (originalData.length > 0) {
+                csvHeaders = Object.keys(originalData[0]).filter(
+                  (key) => key !== "__id"
+                );
+              }
+
+              updateFuse();
+              performSearch();
+
+              // Активируем кнопки после загрузки
+              document.getElementById("analyzeBtn").disabled = false;
+              document.getElementById("removeDuplicatesBtn").disabled = false;
+              document.getElementById("mergeDomainsBtn").disabled = false;
+              document.getElementById("downloadBtn").disabled = false;
+            },
+            error: function (err) {
+              console.error("Ошибка парсинга CSV:", err);
+            },
+          });
+        });
+
+      // Привязка событий к кнопкам
+      document
+        .getElementById("analyzeBtn")
+        .addEventListener("click", function () {
+          analyzeData();
+        });
+
+      document
+        .getElementById("removeDuplicatesBtn")
+        .addEventListener("click", function () {
+          if (
+            confirm(
+              "Удалить все дубликаты? Это оставит только одну запись из каждой группы."
+            )
+          ) {
+            removeDuplicates();
+          }
+        });
+
+      document
+        .getElementById("mergeDomainsBtn")
+        .addEventListener("click", function () {
+          if (
+            confirm(
+              "Объединить записи с одинаковым доменом и учетными данными? URL будут объединены через запятую."
+            )
+          ) {
+            mergeDomainGroups();
+          }
+        });
+
+      document
+        .getElementById("searchInput")
+        .addEventListener("input", function () {
+          performSearch();
+        });
+
+      document
+        .getElementById("selectAllBtn")
+        .addEventListener("click", function () {
+          selectAllFiltered();
+        });
+
+      document
+        .getElementById("deleteSelectedBtn")
+        .addEventListener("click", function () {
+          if (confirm("Удалить выбранные записи?")) {
+            deleteSelectedRecords();
+          }
+        });
+
+      document
+        .getElementById("downloadBtn")
+        .addEventListener("click", function () {
+          downloadCSV();
+        });
+
+      // Обработчики для чекбоксов
+      document
+        .getElementById("groupDomains")
+        .addEventListener("change", function () {
+          if (originalData.length > 0) {
+            analyzeData();
+          }
+        });
+
+      document
+        .getElementById("exactDuplicatesOnly")
+        .addEventListener("change", function () {
+          if (originalData.length > 0) {
+            analyzeData();
+          }
+        });
+    </script>
+  </body>
+</html>
